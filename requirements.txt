@@ -1,0 +1,5 @@
+python-dotenv>=1.0.1,<2
+requests>=2.32.0,<3
+openai>=1.50.0,<3
+braintrust>=0.0.198
+PyYAML>=6.0,<7
