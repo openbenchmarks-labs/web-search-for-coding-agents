@@ -243,9 +243,35 @@ def selftest() -> int:
         ("linkup_fast", "LINKUP_API_KEY"),
         ("tavily_fast", "TAVILY_API_KEY"),
         ("brave", "BRAVE_SEARCH_API_KEY"),
+        ("you", "YDC_API_KEY"),
+        ("tinyfish", "TINYFISH_API_KEY"),
+        ("perplexity_low", "PERPLEXITY_API_KEY"),
+        ("perplexity_high", "PERPLEXITY_API_KEY"),
     )
     for name, key in probes:
-        if not os.environ.get(key):
+        if name == "you" and not (
+            os.environ.get("YDC_API_KEY")
+            or os.environ.get("YOU_API_KEY")
+            or os.environ.get("YOU_KEY")
+        ):
+            print(f"skip live {name} (no YDC_API_KEY)")
+            continue
+        if name == "tinyfish" and not (
+            os.environ.get("TINYFISH_API_KEY") or os.environ.get("TINYFISH_KEY")
+        ):
+            print(f"skip live {name} (no TINYFISH_API_KEY)")
+            continue
+        if name in ("perplexity_low", "perplexity_high") and not (
+            os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("PERPLEXITY_API")
+        ):
+            print(f"skip live {name} (no PERPLEXITY_API_KEY)")
+            continue
+        if not os.environ.get(key) and name not in (
+            "you",
+            "tinyfish",
+            "perplexity_low",
+            "perplexity_high",
+        ):
             print(f"skip live {name} (no {key})")
             continue
         hits = get_backend(name).search("site:example.com example domain", max_results=1)
@@ -271,9 +297,11 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Vendor id, comma list, or all (default). all requires --split. "
             "search-only: parallel_turbo, parallel_fast, exa_fast, exa_instant, "
-            "tavily_fast, brave, linkup_fast, firecrawl. "
+            "tavily_fast, brave, linkup_fast, firecrawl, you, tinyfish, "
+            "perplexity_low. "
             "search-fetch: parallel_basic, parallel_advanced, exa_auto, exa_deep, "
-            "tavily_basic, tavily_advanced, linkup_standard, firecrawl. "
+            "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you, "
+            "tinyfish, perplexity_high. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."
         ),
     )

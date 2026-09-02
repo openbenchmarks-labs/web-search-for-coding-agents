@@ -1,16 +1,20 @@
 """Pluggable web-search backends.
 
-HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, and Brave
-(LLM Context). Vendors are locked to search-only vs search-fetch boards in
-SEARCH_ONLY_BACKENDS / SEARCH_FETCH_BACKENDS.
+HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, Brave
+(LLM Context), You.com, TinyFish, and Perplexity. Vendors are locked to
+search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
+SEARCH_FETCH_BACKENDS. Firecrawl, You, and TinyFish sit on both.
+Perplexity low is search-only; Perplexity high is search-fetch.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Callable, Protocol
+from urllib.parse import urlparse
 
 import requests
 
@@ -26,6 +30,12 @@ TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
 BRAVE_LLM_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 BRAVE_SNIPPET_CHARS = 8000
+YOU_SEARCH_URL = "https://ydc-index.io/v1/search"
+YOU_CONTENTS_URL = "https://ydc-index.io/v1/contents"
+TINYFISH_SEARCH_URL = "https://api.search.tinyfish.ai"
+TINYFISH_FETCH_URL = "https://api.fetch.tinyfish.ai"
+TINYFISH_FETCH_TIMEOUT_S = 150
+PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
 HEADER_REDACT_TOKENS = (
     "authorization",
     "api-key",
@@ -58,6 +68,34 @@ class SearchBackend(Protocol):
         ...
 
 
+# Parallel ignores Google site: in the query string; restrict via source_policy.
+# Other vendors must keep receiving the agent query unchanged.
+_SITE_INCLUDE_RE = re.compile(r"(?<![-])site:([^\s]+)", re.I)
+
+
+def parallel_site_policy(query: str) -> tuple[str, list[str]]:
+    """Lift site: hosts into include_domains and strip them from the query.
+
+    Path suffixes are dropped (Parallel allow-lists hosts, not paths).
+    `-site:` is left in the query and is not mapped to exclude_domains.
+    """
+    domains: list[str] = []
+    seen: set[str] = set()
+
+    def _take(match: re.Match[str]) -> str:
+        raw = match.group(1).strip("\"'").rstrip("/")
+        raw = re.sub(r"^https?://", "", raw, flags=re.I)
+        raw = raw.removeprefix("www.")
+        host = raw.split("/", 1)[0].strip(".").lower()
+        if host and host not in seen:
+            seen.add(host)
+            domains.append(host)
+        return " "
+
+    cleaned = re.sub(r"\s+", " ", _SITE_INCLUDE_RE.sub(_take, query)).strip()
+    return cleaned, domains
+
+
 class ParallelBasic:
     name = "parallel_basic"
     mode = "basic"
@@ -68,20 +106,29 @@ class ParallelBasic:
         if not key:
             raise RuntimeError(f"PARALLEL_API_KEY is required for {self.name}")
         timeout = 90 if self.mode == "advanced" else 45 if self.mode in {"turbo", "fast"} else 60
+        sent, include_domains = parallel_site_policy(query)
+        if not sent:
+            sent = " ".join(include_domains) or query
+        advanced: dict[str, Any] = {"max_results": max_results}
+        if include_domains:
+            advanced["source_policy"] = {"include_domains": include_domains}
         payload, meta = vendor_call(self,
             "POST",
             PARALLEL_SEARCH_URL,
             headers={"x-api-key": key, "Content-Type": "application/json"},
             json_body={
-                "objective": query,
-                "search_queries": [query],
+                "objective": sent,
+                "search_queries": [sent],
                 "mode": self.mode,
-                "advanced_settings": {"max_results": max_results},
+                "advanced_settings": advanced,
             },
             timeout=timeout,
         )
         hits = parse_parallel_hits(payload, max_results=max_results)
         self.last_meta = _search_meta(meta, hits)
+        if include_domains:
+            self.last_meta["include_domains"] = include_domains
+            self.last_meta["query_stripped"] = sent
         return hits
 
     def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
@@ -421,6 +468,194 @@ class BraveSearch:
         raise RuntimeError("brave is LLM Context search-only; web_fetch is not wired")
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+class YouSearch:
+    """You.com Web Search + Contents.
+
+    Search: POST /v1/search with snippets only (no extraction). Fetch: Contents
+    API for known URLs. Dual-split, same pattern as Firecrawl.
+    """
+
+    name = "you"
+    last_meta: dict[str, Any] | None = None
+
+    def _key(self) -> str:
+        key = _first_env("YDC_API_KEY", "YOU_API_KEY", "YOU_KEY")
+        if not key:
+            raise RuntimeError("YDC_API_KEY is required for you")
+        return key
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-API-Key": self._key(), "Content-Type": "application/json"}
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        n = max(1, min(int(max_results), 100))
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            YOU_SEARCH_URL,
+            headers=self._headers(),
+            json_body={"query": query, "count": n},
+            timeout=30,
+        )
+        hits = parse_you_hits(payload, max_results=n)
+        self.last_meta = _search_meta(meta, hits)
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del objective
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            YOU_CONTENTS_URL,
+            headers=self._headers(),
+            json_body={"urls": [url], "formats": ["markdown"], "crawl_timeout": 20},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        page = parse_you_contents(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
+class TinyfishSearch:
+    """TinyFish Search + Fetch.
+
+    Search: GET api.search.tinyfish.ai (no count param; slice to max_results).
+    Fetch: POST api.fetch.tinyfish.ai format=markdown. Dual-split.
+    """
+
+    name = "tinyfish"
+    last_meta: dict[str, Any] | None = None
+
+    def _key(self) -> str:
+        key = _first_env("TINYFISH_API_KEY", "TINYFISH_KEY")
+        if not key:
+            raise RuntimeError("TINYFISH_API_KEY is required for tinyfish")
+        return key
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-API-Key": self._key(), "Accept": "application/json"}
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        payload, meta = vendor_call(
+            self,
+            "GET",
+            TINYFISH_SEARCH_URL,
+            headers=self._headers(),
+            params={"query": query},
+            timeout=30,
+        )
+        hits = parse_tinyfish_hits(payload, max_results=max_results)
+        self.last_meta = _search_meta(meta, hits)
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        body: dict[str, Any] = {"urls": [url], "format": "markdown"}
+        if objective.strip():
+            body["purpose"] = objective.strip()[:2000]
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            TINYFISH_FETCH_URL,
+            headers={**self._headers(), "Content-Type": "application/json"},
+            json_body=body,
+            timeout=TINYFISH_FETCH_TIMEOUT_S,
+        )
+        page = parse_tinyfish_fetch(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
+class PerplexitySearch:
+    """Perplexity Search API. No contents endpoint.
+
+    search_context_size=low is search-only (perplexity_low). high is
+    search-fetch (perplexity_high); fetch() re-searches the URL at high context
+    and maps snippet → content.
+    """
+
+    name = "perplexity_low"
+    search_context_size = "low"
+    last_meta: dict[str, Any] | None = None
+
+    def _key(self) -> str:
+        key = _first_env("PERPLEXITY_API_KEY", "PERPLEXITY_API")
+        if not key:
+            raise RuntimeError(f"PERPLEXITY_API_KEY is required for {self.name}")
+        return key
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._key()}",
+            "Content-Type": "application/json",
+        }
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        n = max(1, min(int(max_results), 20))
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            PERPLEXITY_SEARCH_URL,
+            headers=self._headers(),
+            json_body={
+                "query": query,
+                "max_results": n,
+                "search_context_size": self.search_context_size,
+            },
+            timeout=45,
+        )
+        hits = parse_perplexity_hits(payload, max_results=n)
+        self.last_meta = _search_meta(meta, hits)
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del url, objective
+        raise RuntimeError(
+            f"{self.name} is Perplexity search-only (search_context_size=low); "
+            "web_fetch is not wired"
+        )
+
+
+class PerplexityHigh(PerplexitySearch):
+    name = "perplexity_high"
+    search_context_size = "high"
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del objective
+        host = urlparse(url).hostname or ""
+        body: dict[str, Any] = {
+            "query": url,
+            "max_results": 1,
+            "search_context_size": self.search_context_size,
+        }
+        if host:
+            body["search_domain_filter"] = [host]
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            PERPLEXITY_SEARCH_URL,
+            headers=self._headers(),
+            json_body=body,
+            timeout=45,
+        )
+        page = parse_perplexity_fetch(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
 def parse_parallel_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
     hits: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -710,6 +945,185 @@ def parse_tavily_extract(
     }
 
 
+def _you_hit_text(item: dict[str, Any]) -> str:
+    contents = item.get("contents") if isinstance(item.get("contents"), dict) else {}
+    highlights = (contents or {}).get("highlights")
+    if not isinstance(highlights, list):
+        highlights = item.get("highlights")
+    parts: list[str] = []
+    if isinstance(highlights, list):
+        for part in highlights:
+            if isinstance(part, str) and part.strip():
+                parts.append(part.strip())
+            elif isinstance(part, dict):
+                text = part.get("text") or part.get("snippet") or part.get("content") or ""
+                if str(text).strip():
+                    parts.append(str(text).strip())
+    if parts:
+        return "\n".join(parts)
+    chunks = item.get("snippets") or []
+    if isinstance(chunks, list) and chunks:
+        return "\n".join(str(part) for part in chunks if part)
+    return str(item.get("description") or item.get("snippet") or "")
+
+
+def parse_you_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    data = payload.get("results") if isinstance(payload, dict) else payload
+    rows: list[Any] = []
+    if isinstance(data, dict):
+        rows.extend(data.get("web") or [])
+        rows.extend(data.get("news") or [])
+    elif isinstance(data, list):
+        rows = data
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not url:
+            continue
+        url = str(url)
+        if url in seen:
+            continue
+        seen.add(url)
+        snippet = _you_hit_text(item)
+        hits.append({
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": snippet[:1200],
+        })
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_you_contents(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    rows = payload if isinstance(payload, list) else None
+    if rows is None and isinstance(payload, dict):
+        rows = payload.get("results") or payload.get("data") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+    if not isinstance(rows, list):
+        rows = []
+    item = {}
+    for row in rows:
+        if isinstance(row, dict):
+            item = row
+            if str(row.get("url") or "") == url:
+                break
+    content = str(item.get("markdown") or item.get("html") or item.get("content") or "")
+    if not content:
+        raise RuntimeError(f"{url}: contents returned no markdown")
+    return {
+        "url": str(item.get("url") or url),
+        "title": str(item.get("title") or ""),
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+    }
+
+
+def parse_tinyfish_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    rows = (payload or {}).get("results") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        url = str(item["url"])
+        if url in seen:
+            continue
+        seen.add(url)
+        hits.append({
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": str(item.get("snippet") or item.get("description") or "")[:1200],
+        })
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_tinyfish_fetch(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    data = payload if isinstance(payload, dict) else {}
+    errors = data.get("errors") or []
+    results = data.get("results") or []
+    if errors and not results:
+        first = errors[0] if isinstance(errors[0], dict) else {}
+        detail = first.get("error") or first.get("message") or "fetch failed"
+        raise RuntimeError(f"{url}: {detail}")
+    item = results[0] if results and isinstance(results[0], dict) else {}
+    text = item.get("text")
+    if isinstance(text, dict):
+        content = json.dumps(text)
+    else:
+        content = str(text or item.get("content") or item.get("markdown") or "")
+    if not content:
+        raise RuntimeError(f"{url}: fetch returned no text")
+    return {
+        "url": str(item.get("final_url") or item.get("url") or url),
+        "title": str(item.get("title") or ""),
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+    }
+
+
+def parse_perplexity_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    rows = (payload or {}).get("results") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        url = str(item["url"])
+        if url in seen:
+            continue
+        seen.add(url)
+        hits.append({
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": str(item.get("snippet") or item.get("content") or "")[:1200],
+        })
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_perplexity_fetch(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    rows = (payload or {}).get("results") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError(f"{url}: perplexity high search returned no results")
+    item = rows[0] if isinstance(rows[0], dict) else {}
+    content = str(item.get("snippet") or item.get("content") or "")
+    if not content:
+        raise RuntimeError(f"{url}: perplexity high returned an empty snippet")
+    return {
+        "url": str(item.get("url") or url),
+        "title": str(item.get("title") or ""),
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+    }
+
+
 def vendor_request(
     method: str,
     url: str,
@@ -865,6 +1279,9 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "brave",
     "linkup_fast",
     "firecrawl",
+    "you",
+    "tinyfish",
+    "perplexity_low",
 )
 SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "parallel_basic",
@@ -875,6 +1292,9 @@ SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "tavily_advanced",
     "linkup_standard",
     "firecrawl",
+    "you",
+    "tinyfish",
+    "perplexity_high",
 )
 BACKEND_ALIASES = {
     "exa": "exa_auto",
@@ -882,9 +1302,10 @@ BACKEND_ALIASES = {
     "linkup": "linkup_fast",
 }
 # Search-only exclusive rows cannot turn fetch on. Search+fetch exclusive rows
-# cannot turn fetch off. firecrawl sits on both splits.
-FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - {"firecrawl"}
-FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - {"firecrawl"}
+# cannot turn fetch off. Dual-split vendors sit on both boards.
+DUAL_SPLIT_BACKENDS = frozenset({"firecrawl", "you", "tinyfish"})
+FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - DUAL_SPLIT_BACKENDS
+FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - DUAL_SPLIT_BACKENDS
 
 BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "parallel_basic": ParallelBasic,
@@ -905,6 +1326,10 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "tavily_basic": TavilyBasic,
     "tavily_advanced": TavilyAdvanced,
     "brave": BraveSearch,
+    "you": YouSearch,
+    "tinyfish": TinyfishSearch,
+    "perplexity_low": PerplexitySearch,
+    "perplexity_high": PerplexityHigh,
 }
 
 
