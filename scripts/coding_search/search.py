@@ -163,6 +163,24 @@ class FirecrawlSearch:
         return page
 
 
+class FirecrawlDevSearch(FirecrawlSearch):
+    """Firecrawl Developer index — `firecrawl_developer_search` on the hosted MCP.
+
+    Search hits come from the developer index; fetch inherits FirecrawlSearch's
+    /v2/scrape. So the ONLY difference vs the `firecrawl` arm is the search tool:
+    developer index vs general web search — a clean A/B on the same tasks.
+    """
+
+    name = "fc_dev"
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        from .fc_dev_mcp import developer_search
+
+        hits = developer_search(query, max_results=max_results)
+        self.last_meta = _search_meta({}, hits)
+        return hits
+
+
 class ExaSearch:
     """Exa search. Fetch is POST /contents with text=true (get_contents)."""
 
@@ -867,6 +885,7 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "firecrawl",
 )
 SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
+    "fc_dev",
     "parallel_basic",
     "parallel_advanced",
     "exa_auto",
@@ -892,6 +911,7 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "parallel_fast": ParallelFast,
     "parallel_advanced": ParallelAdvanced,
     "firecrawl": FirecrawlSearch,
+    "fc_dev": FirecrawlDevSearch,
     "exa_auto": ExaSearch,
     "exa": ExaSearch,
     "exa_deep": ExaDeep,
