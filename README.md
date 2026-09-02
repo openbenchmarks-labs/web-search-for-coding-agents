@@ -7,9 +7,16 @@ benchmark.
 Published by **[OpenBenchmarks Labs](https://openbenchmarks.com)**.
 
 This repo is **open code only**. It does not include the scored private
-task set, run dumps, or leaderboard snapshots. The public 60-ticket set
-(format only; not comparable to the live boards) is on Hugging Face:
+task set, run dumps, or leaderboard snapshots.
+
+**Datasets.** The live boards are scored on a held-out **100-ticket**
+private set that is not distributed, so vendors and models cannot train
+and fit to the benchmark. A **30-ticket** public set (format only) is on
+Hugging Face as
 [`openbenchmarks/OB-Code-Websearch`](https://huggingface.co/datasets/openbenchmarks/OB-Code-Websearch).
+Use the public rows to inspect the format; scores on those rows are not
+comparable to the boards. Task completion is mean ± SD of 3 runs on the
+100 private tickets.
 
 ## What is here
 
@@ -37,10 +44,11 @@ Perplexity low.
 basic/advanced, Linkup standard, Firecrawl search + scrape, You, TinyFish,
 Perplexity high.
 
-The model (`gpt-5.6-sol`), ticket, and budgets stay fixed. Only the
-search/fetch vendor changes. Parallel maps `site:` hosts into
-`source_policy.include_domains` (the query string is stripped of those
-operators); other vendors receive the agent query unchanged.
+The model (`gpt-5.6-sol`), ticket, and budgets stay fixed (32 turns, 5
+searches, 5 fetches on search & fetch). Only the search/fetch vendor
+changes. Parallel maps `site:` hosts into `source_policy.include_domains`
+(the query string is stripped of those operators); other vendors receive
+the agent query unchanged.
 
 ## Run
 
