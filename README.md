@@ -30,13 +30,17 @@ in that run's search or fetch results.
 ## Boards
 
 **search-only** (no `web_fetch`): Parallel turbo/fast, Exa fast/instant,
-Tavily fast, Brave LLM Context, Linkup fast, Firecrawl.
+Tavily fast, Brave LLM Context, Linkup fast, Firecrawl, You, TinyFish,
+Perplexity low.
 
 **search & fetch**: Parallel basic/advanced, Exa auto/deep, Tavily
-basic/advanced, Linkup standard, Firecrawl search + scrape.
+basic/advanced, Linkup standard, Firecrawl search + scrape, You, TinyFish,
+Perplexity high.
 
 The model (`gpt-5.6-sol`), ticket, and budgets stay fixed. Only the
-search/fetch vendor changes.
+search/fetch vendor changes. Parallel maps `site:` hosts into
+`source_policy.include_domains` (the query string is stripped of those
+operators); other vendors receive the agent query unchanged.
 
 ## Run
 
@@ -62,7 +66,8 @@ DATASETS_ROOT=/path/to/tickets PYTHONPATH=scripts python -m coding_search run \
 
 Keys: `OPENAI_API_KEY` (or Azure NEXTGEN), plus the vendor you run
 (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`, `LINKUP_API_KEY`,
-`TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`). Optional:
+`TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `YDC_API_KEY` or `YOU_API_KEY`,
+`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`). Optional:
 `BRAINTRUST_API_KEY`.
 
 ## License
