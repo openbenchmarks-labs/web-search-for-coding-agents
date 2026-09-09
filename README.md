@@ -27,12 +27,12 @@ held-out tickets, model fixed at `gpt-5.6-sol`.
 | # | Vendor | Task completion | Avg search | Median tokens |
 |---|---|---|---|---|
 | 1 | Exa deep | 83.0% ± 1.0 | 3.97s | 23,660 |
-| 2 | Exa auto | 81.7% ± 1.2 | 1.19s | 27,433 |
-| 3 | Perplexity (high) | 77.7% ± 1.5 | 991ms | 20,062 |
-| 4 | Parallel advanced | 77.0% ± 1.0 | 3.11s | 27,092 |
-| 5 | Parallel basic | 76.0% ± 0.0 | 1.59s | 32,809 |
-| 6 | Firecrawl | 76.0% ± 1.0 | 2.81s | 17,379 |
-| 7 | TinyFish | 69.0% ± 3.0 | 2.03s | 12,579 |
+| 2 | Exa auto | 81.7% ± 1.1 | 1.19s | 27,433 |
+| 3 | TinyFish | 79.0% ± 2.0 | 1.32s | 12,844 |
+| 4 | Perplexity (high) | 77.7% ± 1.5 | 991ms | 20,062 |
+| 5 | Parallel advanced | 77.0% ± 1.0 | 3.11s | 27,092 |
+| 6 | Parallel basic | 76.0% ± 0.0 | 1.59s | 32,809 |
+| 7 | Firecrawl | 76.0% ± 1.0 | 2.81s | 17,379 |
 | 8 | You | 61.7% ± 0.6 | 532ms | 29,204 |
 | 9 | Tavily advanced | 60.0% ± 2.0 | 3.41s | 26,269 |
 | 10 | Tavily basic | 59.0% ± 1.7 | 1.50s | 27,405 |
@@ -50,11 +50,11 @@ held-out tickets, model fixed at `gpt-5.6-sol`.
 | 6 | Exa instant | 61.3% ± 2.9 | 447ms | 22,423 |
 | 7 | TinyFish | 59.3% ± 1.5 | 2.15s | 7,469 |
 | 8 | Tavily fast | 47.3% ± 2.5 | 282ms | 23,922 |
-| 9 | Linkup fast | 43.3% ± 1.2 | 1.39s | 24,057 |
+| 9 | Linkup fast | 43.3% ± 1.1 | 1.39s | 24,057 |
 | 10 | Brave (LLM Context) | 43.0% ± 2.0 | 547ms | 21,000 |
 | 11 | You | 39.3% ± 2.5 | 525ms | 13,874 |
 
-Snapshot of 2026-08-21. The
+Snapshot of 2026-09-09. The
 [live board](https://openbenchmarks.com/web-search-for-coding-agents) is the
 source of truth; re-read it before quoting these numbers.
 
@@ -75,7 +75,7 @@ Full ranking: https://openbenchmarks.com/web-search-for-coding-agents/fastest-se
 **Firecrawl** at 7,456 median tokens per ticket leads search-only, with TinyFish
 close behind at 7,469 and Perplexity (low) at 8,765, and Perplexity carries the
 top completion score at that token budget. On search & fetch, **TinyFish** leads
-at 12,579. Linkup standard costs 57,791, roughly 4.6× TinyFish, for the lowest
+at 12,844. Linkup standard costs 57,791, roughly 4.5× TinyFish, for the lowest
 completion on the board.
 
 This measures median LLM tokens per ticket, not search-API list price.
@@ -166,6 +166,12 @@ same vendors are measured on two other jobs:
   https://openbenchmarks.com/multi-turn-company-search
 - **Methodology and all three boards:** https://openbenchmarks.com/web-search
 - **Agent-readable index:** https://openbenchmarks.com/llms.txt
+
+## Changelog
+
+- **2026-09-09.** Re-evaluated TinyFish after updates were rolled out to their
+  GA Fetch endpoint. Search & fetch completion moves to 79.0% ± 2.0 (3rd);
+  median tokens 12,844; avg search 1.32s.
 
 ## License
 
