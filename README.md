@@ -141,7 +141,8 @@ DATASETS_ROOT=/path/to/tickets PYTHONPATH=scripts python -m coding_search run \
 Keys: `OPENAI_API_KEY` (or Azure NEXTGEN), plus the vendor you run
 (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`, `LINKUP_API_KEY`,
 `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `YDC_API_KEY` or `YOU_API_KEY`,
-`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`). Optional: `BRAINTRUST_API_KEY`.
+`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`, `STRING_API_KEY`). Optional:
+`BRAINTRUST_API_KEY`.
 
 ## Repository map
 
