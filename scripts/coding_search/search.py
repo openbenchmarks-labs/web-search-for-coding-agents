@@ -1,9 +1,9 @@
 """Pluggable web-search backends.
 
 HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, Brave
-(LLM Context), You.com, TinyFish, and Perplexity. Vendors are locked to
+(LLM Context), You.com, TinyFish, Perplexity, and String. Vendors are locked to
 search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
-SEARCH_FETCH_BACKENDS. Firecrawl, You, and TinyFish sit on both.
+SEARCH_FETCH_BACKENDS. Firecrawl, You, TinyFish, and String sit on both.
 Perplexity low is search-only; Perplexity high is search-fetch.
 """
 
@@ -36,6 +36,8 @@ TINYFISH_SEARCH_URL = "https://api.search.tinyfish.ai"
 TINYFISH_FETCH_URL = "https://api.fetch.tinyfish.ai"
 TINYFISH_FETCH_TIMEOUT_S = 150
 PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
+STRING_SEARCH_URL = "https://request.usestring.ai/v1/search"
+STRING_FETCH_URL = "https://request.usestring.ai/v1/fetch"
 HEADER_REDACT_TOKENS = (
     "authorization",
     "api-key",
@@ -656,6 +658,61 @@ class PerplexityHigh(PerplexitySearch):
         return page
 
 
+class StringSearch:
+    """String Web Access search + fetch.
+
+    Search: POST /v1/search with engine=google. Organic results with their
+    result-page snippets; no count param, so slice to max_results.
+
+    Fetch: POST /v1/fetch format=markdown, markdownMode=readable. Readable
+    drops forum and docs-site navigation that otherwise fills the fetch budget
+    before the article starts. The body is text/markdown, with the destination
+    status in x-status-code. Dual-split, same pattern as Firecrawl.
+    """
+
+    name = "string"
+    engine = "google"
+    last_meta: dict[str, Any] | None = None
+
+    def _key(self) -> str:
+        key = os.environ.get("STRING_API_KEY")
+        if not key:
+            raise RuntimeError("STRING_API_KEY is required for string")
+        return key
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._key()}", "Content-Type": "application/json"}
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            STRING_SEARCH_URL,
+            headers=self._headers(),
+            json_body={"query": query, "engine": self.engine},
+            timeout=60,
+        )
+        hits = parse_string_hits(payload, max_results=max_results)
+        self.last_meta = _search_meta(meta, hits)
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del objective
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            STRING_FETCH_URL,
+            headers=self._headers(),
+            json_body={"url": url, "format": "markdown", "markdownMode": "readable"},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        page = parse_string_fetch(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
 def parse_parallel_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
     hits: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -1124,6 +1181,48 @@ def parse_perplexity_fetch(
     }
 
 
+def parse_string_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    rows = (payload or {}).get("results") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        url = str(item["url"])
+        if url in seen:
+            continue
+        seen.add(url)
+        hits.append({
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": str(item.get("snippet") or "")[:1200],
+        })
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_string_fetch(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    data = payload if isinstance(payload, dict) else {}
+    content = str(data.get("markdown") or "")
+    if not content:
+        raise RuntimeError(f"{url}: fetch returned no markdown")
+    return {
+        "url": url,
+        "title": "",
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+        "_status_code": data.get("status_code"),
+    }
+
+
 def vendor_request(
     method: str,
     url: str,
@@ -1165,10 +1264,18 @@ def vendor_request(
         error = RuntimeError(f"{type(exc).__name__}: {exc}")
         setattr(error, "vendor_meta", meta)
         raise error from exc
-    try:
-        payload: Any = response.json() if response.content else {}
-    except ValueError:
-        payload = {"raw": (response.text or "")[:500]}
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if response.ok and content_type.startswith("text/markdown"):
+        # String returns the page itself, not a JSON envelope.
+        payload: Any = {
+            "markdown": response.text,
+            "status_code": response.headers.get("x-status-code"),
+        }
+    else:
+        try:
+            payload = response.json() if response.content else {}
+        except ValueError:
+            payload = {"raw": (response.text or "")[:500]}
     meta: dict[str, Any] = {
         "endpoint": url,
         "method": method,
@@ -1282,6 +1389,7 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "you",
     "tinyfish",
     "perplexity_low",
+    "string",
 )
 SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "parallel_basic",
@@ -1295,6 +1403,7 @@ SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "you",
     "tinyfish",
     "perplexity_high",
+    "string",
 )
 BACKEND_ALIASES = {
     "exa": "exa_auto",
@@ -1303,7 +1412,7 @@ BACKEND_ALIASES = {
 }
 # Search-only exclusive rows cannot turn fetch on. Search+fetch exclusive rows
 # cannot turn fetch off. Dual-split vendors sit on both boards.
-DUAL_SPLIT_BACKENDS = frozenset({"firecrawl", "you", "tinyfish"})
+DUAL_SPLIT_BACKENDS = frozenset({"firecrawl", "you", "tinyfish", "string"})
 FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - DUAL_SPLIT_BACKENDS
 FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - DUAL_SPLIT_BACKENDS
 
@@ -1330,6 +1439,7 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "tinyfish": TinyfishSearch,
     "perplexity_low": PerplexitySearch,
     "perplexity_high": PerplexityHigh,
+    "string": StringSearch,
 }
 
 
