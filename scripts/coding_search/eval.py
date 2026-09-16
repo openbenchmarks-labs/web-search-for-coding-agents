@@ -243,13 +243,16 @@ def selftest() -> int:
         ("linkup_fast", "LINKUP_API_KEY"),
         ("tavily_fast", "TAVILY_API_KEY"),
         ("brave", "BRAVE_SEARCH_API_KEY"),
-        ("you", "YDC_API_KEY"),
+        ("nimble_lite", "NIMBLE_API_KEY"),
+        ("nimble_standard", "NIMBLE_API_KEY"),
+        ("you_highlights", "YDC_API_KEY"),
+        ("you_highlights_core", "YDC_API_KEY"),
         ("tinyfish", "TINYFISH_API_KEY"),
         ("perplexity_low", "PERPLEXITY_API_KEY"),
         ("perplexity_high", "PERPLEXITY_API_KEY"),
     )
     for name, key in probes:
-        if name == "you" and not (
+        if name in ("you_highlights", "you_highlights_core") and not (
             os.environ.get("YDC_API_KEY")
             or os.environ.get("YOU_API_KEY")
             or os.environ.get("YOU_KEY")
@@ -267,7 +270,8 @@ def selftest() -> int:
             print(f"skip live {name} (no PERPLEXITY_API_KEY)")
             continue
         if not os.environ.get(key) and name not in (
-            "you",
+            "you_highlights",
+            "you_highlights_core",
             "tinyfish",
             "perplexity_low",
             "perplexity_high",
@@ -296,11 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
         help=(
             "Vendor id, comma list, or all (default). all requires --split. "
-            "search-only: parallel_turbo, parallel_fast, exa_fast, exa_instant, "
-            "tavily_fast, brave, linkup_fast, firecrawl, you, tinyfish, "
+            "search-only: nimble_lite, nimble_standard, parallel_turbo, parallel_fast, exa_fast, exa_instant, "
+            "tavily_fast, brave, linkup_fast, firecrawl, you_highlights, you_highlights_core, tinyfish, "
             "perplexity_low. "
-            "search-fetch: parallel_basic, parallel_advanced, exa_auto, exa_deep, "
-            "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you, "
+            "search-fetch: nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
+            "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you_highlights, you_highlights_core, "
             "tinyfish, perplexity_high. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."
         ),
