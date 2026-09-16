@@ -1,7 +1,7 @@
 # Web Search API Benchmark for Coding Agents and Developers
 
 Open, independent benchmark of the best web search APIs for coding agents: Exa,
-Parallel, Perplexity, Firecrawl, Tavily, Linkup, Brave, You, and TinyFish.
+Parallel, Perplexity, Firecrawl, Tavily, Linkup, Brave, You, Nimble, and TinyFish.
 Scored on grounded task completion against held-out enterprise documentation
 tickets. Open source code + open data. Search-only and search & fetch are ranked
 separately. The model, the tickets, and the budgets stay fixed; only the search
@@ -24,37 +24,43 @@ held-out tickets, model fixed at `gpt-5.6-sol`.
 
 ### Search & fetch
 
-| # | Vendor | Task completion | Avg search | Median tokens |
-|---|---|---|---|---|
-| 1 | Exa deep | 83.0% ± 1.0 | 3.97s | 23,660 |
-| 2 | Exa auto | 81.7% ± 1.1 | 1.19s | 27,433 |
-| 3 | TinyFish | 79.0% ± 2.0 | 1.32s | 12,844 |
-| 4 | Perplexity (high) | 77.7% ± 1.5 | 991ms | 20,062 |
-| 5 | Parallel advanced | 77.0% ± 1.0 | 3.11s | 27,092 |
-| 6 | Parallel basic | 76.0% ± 0.0 | 1.59s | 32,809 |
-| 7 | Firecrawl | 76.0% ± 1.0 | 2.81s | 17,379 |
-| 8 | You | 61.7% ± 0.6 | 532ms | 29,204 |
-| 9 | Tavily advanced | 60.0% ± 2.0 | 3.41s | 26,269 |
-| 10 | Tavily basic | 59.0% ± 1.7 | 1.50s | 27,405 |
-| 11 | Linkup standard | 48.3% ± 4.9 | 2.00s | 57,791 |
+| # | Vendor | Configuration | Task completion | Avg search | Median tokens |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Exa deep | `type=deep` | 83.0% ± 1.0 | 3.97s | 23,660 |
+| 2 | Exa auto | `type=auto` | 81.7% ± 1.1 | 1.19s | 27,433 |
+| 3 | TinyFish | Default | 79.0% ± 2.0 | 1.32s | 12,844 |
+| 4 | Perplexity (high) | `search_context_size=high` | 77.7% ± 1.5 | 991ms | 20,062 |
+| 5 | Parallel advanced | `mode=advanced` | 77.0% ± 1.0 | 3.11s | 27,092 |
+| 6 | Parallel basic | `mode=basic` | 76.0% ± 0.0 | 1.59s | 32,809 |
+| 7 | Firecrawl | Default | 76.0% ± 1.0 | 2.81s | 17,379 |
+| 8 | Nimble | `search_depth=lite` | 60.3% ± 2.5 | 1.93s | 16,828 |
+| 9 | Tavily advanced | `search_depth=advanced` | 60.0% ± 2.0 | 3.41s | 26,269 |
+| 10 | Tavily basic | `search_depth=basic` | 59.0% ± 1.7 | 1.50s | 27,405 |
+| 11 | You | `extraction_mode=highlights` | 55.0% ± 1.7 | 638ms | 42,806 |
+| 12 | You | `extraction_mode=highlights` · `knowledge=core` | 54.0% ± 2.0 | 678ms | 37,453 |
+| 13 | Linkup standard | `depth=standard` | 48.3% ± 4.9 | 2.00s | 57,791 |
+| 14 | Nimble | `search_depth=standard` | 45.0% ± 1.0 | 905ms | 28,586 |
 
 ### Search only
 
-| # | Vendor | Task completion | Avg search | Median tokens |
-|---|---|---|---|---|
-| 1 | Perplexity (low) | 77.3% ± 2.1 | 957ms | 8,765 |
-| 2 | Firecrawl | 70.3% ± 1.5 | 2.87s | 7,456 |
-| 3 | Parallel fast | 66.7% ± 1.5 | 953ms | 12,460 |
-| 4 | Exa fast | 66.3% ± 1.5 | 626ms | 22,344 |
-| 5 | Parallel turbo | 64.7% ± 2.1 | 333ms | 14,130 |
-| 6 | Exa instant | 61.3% ± 2.9 | 447ms | 22,423 |
-| 7 | TinyFish | 59.3% ± 1.5 | 2.15s | 7,469 |
-| 8 | Tavily fast | 47.3% ± 2.5 | 282ms | 23,922 |
-| 9 | Linkup fast | 43.3% ± 1.1 | 1.39s | 24,057 |
-| 10 | Brave (LLM Context) | 43.0% ± 2.0 | 547ms | 21,000 |
-| 11 | You | 39.3% ± 2.5 | 525ms | 13,874 |
+| # | Vendor | Configuration | Task completion | Avg search | Median tokens |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Perplexity (low) | `search_context_size=low` | 77.3% ± 2.1 | 957ms | 8,765 |
+| 2 | Firecrawl | Default | 70.3% ± 1.5 | 2.87s | 7,456 |
+| 3 | Parallel fast | `mode=fast` | 66.7% ± 1.5 | 953ms | 12,460 |
+| 4 | Exa fast | `type=fast` | 66.3% ± 1.5 | 626ms | 22,344 |
+| 5 | Parallel turbo | `mode=turbo` | 64.7% ± 2.1 | 333ms | 14,130 |
+| 6 | Exa instant | `type=instant` | 61.3% ± 2.9 | 447ms | 22,423 |
+| 7 | TinyFish | Default | 59.3% ± 1.5 | 2.15s | 7,469 |
+| 8 | Tavily fast | `search_depth=fast` | 47.3% ± 2.5 | 282ms | 23,922 |
+| 9 | Nimble | `search_depth=lite` | 46.7% ± 3.8 | 3.15s | 8,712 |
+| 10 | Linkup fast | `depth=fast` | 43.3% ± 1.1 | 1.39s | 24,057 |
+| 11 | Brave (LLM Context) | LLM Context | 43.0% ± 2.0 | 547ms | 21,000 |
+| 12 | Nimble | `search_depth=standard` | 42.3% ± 2.5 | 878ms | 14,858 |
+| 13 | You | `extraction_mode=highlights` | 41.3% ± 3.1 | 596ms | 20,333 |
+| 14 | You | `extraction_mode=highlights` · `knowledge=core` | 38.3% ± 3.2 | 677ms | 20,786 |
 
-Snapshot of 2026-09-09. The
+Snapshot updated 2026-09-15. The
 [live board](https://openbenchmarks.com/web-search-for-coding-agents) is the
 source of truth; re-read it before quoting these numbers.
 
@@ -65,7 +71,7 @@ whether your agent can open pages.
 ## Which web search API is fastest for coding agents?
 
 **Tavily fast** at 282ms and **Parallel turbo** at 333ms lead search-only average
-search time; **You** at 532ms leads search & fetch. Parallel turbo is the better
+search time; **You** with `extraction_mode=highlights` at 638ms leads search & fetch. Parallel turbo is the better
 trade at the fast end: it holds 64.7% completion against Tavily fast's 47.3%.
 
 Full ranking: https://openbenchmarks.com/web-search-for-coding-agents/fastest-search-api
@@ -168,6 +174,8 @@ same vendors are measured on two other jobs:
 - **Agent-readable index:** https://openbenchmarks.com/llms.txt
 
 ## Changelog
+
+- **2026-09-15.** Added Nimble lite and standard to both existing tables with three-repeat means and standard deviations. Search uses `focus=general` and `full_content=false`; search + fetch calls `POST /v2/extract` with `formats=[markdown]`. Added You highlights and highlights + `knowledge=core` to both modes, using a separate You Contents call for fetch. Published 100-task, three-repeat results, including standard deviations; replaced the older plain You rows.
 
 - **2026-09-09.** Re-evaluated TinyFish after updates were rolled out to their
   GA Fetch endpoint. Search & fetch completion moves to 79.0% ± 2.0 (3rd);
