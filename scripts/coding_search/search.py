@@ -277,8 +277,9 @@ class LinkupSearch:
     """Linkup search + fetch.
 
     Search: depth=fast, outputType=searchResults ($0.005). Query is passed as-is,
-    same as Firecrawl / Parallel basic. Not standard (agentic rewrite, same $)
-    or deep ($0.05). Not sourcedAnswer (LLM answer on top of search).
+    same as Firecrawl / Parallel basic. Subclasses switch depth to standard
+    (agentic rewrite, same $) or deep (multi-step agentic search, $0.05).
+    Not sourcedAnswer (LLM answer on top of search).
 
     Fetch: mode=standard, renderJs=true. JS-rendered markdown extract.
     """
@@ -288,6 +289,7 @@ class LinkupSearch:
     output_type = "searchResults"
     fetch_mode = "standard"
     render_js = True
+    search_timeout_s = 30
     last_meta: dict[str, Any] | None = None
 
     def _key(self) -> str:
@@ -310,7 +312,7 @@ class LinkupSearch:
                 "outputType": self.output_type,
                 "maxResults": max_results,
             },
-            timeout=30,
+            timeout=self.search_timeout_s,
         )
         hits = parse_linkup_hits(payload, max_results=max_results)
         self.last_meta = _search_meta(meta, hits)
@@ -339,6 +341,14 @@ class LinkupSearch:
 class LinkupStandard(LinkupSearch):
     name = "linkup_standard"
     depth = "standard"
+
+
+class LinkupDeep(LinkupSearch):
+    """depth=deep: multi-step agentic search built for multi-hop and hard retrieval. $0.05 per search."""
+
+    name = "linkup_deep"
+    depth = "deep"
+    search_timeout_s = 180
 
 
 class TavilySearch:
@@ -1368,6 +1378,7 @@ SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "tavily_basic",
     "tavily_advanced",
     "linkup_standard",
+    "linkup_deep",
     "firecrawl",
     "you_highlights",
     "you_highlights_core",
@@ -1399,6 +1410,7 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "linkup_fast": LinkupSearch,
     "linkup": LinkupSearch,
     "linkup_standard": LinkupStandard,
+    "linkup_deep": LinkupDeep,
     "tavily_fast": TavilySearch,
     "tavily": TavilySearch,
     "tavily_basic": TavilyBasic,

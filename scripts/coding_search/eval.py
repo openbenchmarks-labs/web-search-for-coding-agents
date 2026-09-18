@@ -304,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             "tavily_fast, brave, linkup_fast, firecrawl, you_highlights, you_highlights_core, tinyfish, "
             "perplexity_low. "
             "search-fetch: nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
-            "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you_highlights, you_highlights_core, "
+            "tavily_basic, tavily_advanced, linkup_standard, linkup_deep, firecrawl, you_highlights, you_highlights_core, "
             "tinyfish, perplexity_high. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."
         ),
