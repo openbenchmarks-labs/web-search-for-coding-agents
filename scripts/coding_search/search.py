@@ -71,12 +71,13 @@ class SearchBackend(Protocol):
 
 # Parallel ignores Google site: in the query string; restrict via source_policy.
 # Other vendors must keep receiving the agent query unchanged.
-_SITE_INCLUDE_RE = re.compile(r"(?<![-])site:([^\s]+)", re.I)
+_SITE_INCLUDE_RE = re.compile(r"(?<!\S)site:([^\s]+)", re.I)
 
 
 def parallel_site_policy(query: str) -> tuple[str, list[str]]:
-    """Lift site: hosts into include_domains and strip them from the query.
+    """Lift whitespace-delimited site: hosts into include_domains.
 
+    Operators must start the query or follow whitespace; embedded text is literal.
     Path suffixes are dropped (Parallel allow-lists hosts, not paths).
     `-site:` is left in the query and is not mapped to exclude_domains.
     """
