@@ -235,6 +235,7 @@ def selftest() -> int:
         print(f"runner {name} constructed name={backend.name}")
     live = []
     probes = (
+        ("context", "CONTEXT_API_KEY"),
         ("parallel_basic", "PARALLEL_API_KEY"),
         ("parallel_turbo", "PARALLEL_API_KEY"),
         ("firecrawl", "FIRECRAWL_API_KEY"),
@@ -300,10 +301,10 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
         help=(
             "Vendor id, comma list, or all (default). all requires --split. "
-            "search-only: nimble_lite, nimble_standard, parallel_turbo, parallel_fast, exa_fast, exa_instant, "
+            "search-only: context, nimble_lite, nimble_standard, parallel_turbo, parallel_fast, exa_fast, exa_instant, "
             "tavily_fast, brave, linkup_fast, firecrawl, you_highlights, you_highlights_core, tinyfish, "
             "perplexity_low. "
-            "search-fetch: nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
+            "search-fetch: context, nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
             "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you_highlights, you_highlights_core, "
             "tinyfish, perplexity_high. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."

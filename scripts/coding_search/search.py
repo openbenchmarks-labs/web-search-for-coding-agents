@@ -1,9 +1,9 @@
 """Pluggable web-search backends.
 
 HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, Brave
-(LLM Context), You.com, TinyFish, and Perplexity. Vendors are locked to
+(LLM Context), You.com, TinyFish, Perplexity, and Context.dev. Vendors are locked to
 search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
-SEARCH_FETCH_BACKENDS. Firecrawl, You, and TinyFish sit on both.
+SEARCH_FETCH_BACKENDS. Context, Firecrawl, You, and TinyFish sit on both.
 Perplexity low is search-only; Perplexity high is search-fetch.
 """
 
@@ -23,6 +23,9 @@ PARALLEL_SEARCH_URL = "https://api.parallel.ai/v1/search"
 PARALLEL_EXTRACT_URL = "https://api.parallel.ai/v1/extract"
 FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
+CONTEXT_SEARCH_URL = "https://api.context.dev/v1/web/search"
+CONTEXT_SCRAPE_URL = "https://api.context.dev/v1/web/scrape/markdown"
+CONTEXT_SNIPPET_CHARS = 20000
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 EXA_CONTENTS_URL = "https://api.exa.ai/contents"
 LINKUP_SEARCH_URL = "https://api.linkup.so/v1/search"
@@ -207,6 +210,52 @@ class FirecrawlSearch:
         page = parse_firecrawl_scrape(payload, url=url)
         flags = _pop_flags(page)
         self.last_meta = {**meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
+class ContextSearch:
+    """Context.dev search Highlights + separate Markdown scrape; dual-split."""
+
+    name = "context"
+    last_meta: dict[str, Any] | None = None
+
+    def _headers(self) -> dict[str, str]:
+        key = os.environ.get("CONTEXT_API_KEY")
+        if not key:
+            raise RuntimeError("CONTEXT_API_KEY is required for context")
+        return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        n = max(1, min(int(max_results), 100))
+        payload, meta = vendor_call(self,
+            "POST",
+            CONTEXT_SEARCH_URL,
+            headers=self._headers(),
+            json_body={
+                "query": query,
+                "numResults": max(10, n),
+                "highlightsOptions": {"enabled": True, "maxCharacters": CONTEXT_SNIPPET_CHARS},
+            },
+            timeout=60,
+        )
+        self.last_meta = meta
+        hits = parse_context_hits(payload, max_results=n)
+        self.last_meta = {**_search_meta(meta, hits), "cache_metadata": payload.get("cache_metadata")}
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del objective
+        payload, meta = vendor_call(self,
+            "GET",
+            CONTEXT_SCRAPE_URL,
+            headers=self._headers(),
+            params={"url": url, "useMainContentOnly": "true"},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        self.last_meta = meta
+        page = parse_context_scrape(payload, url=url)
+        self.last_meta = {**meta, **_pop_flags(page)}
         page["_meta"] = self.last_meta
         return page
 
@@ -781,6 +830,53 @@ def parse_firecrawl_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS
     return hits
 
 
+def parse_context_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    rows = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError("context search returned no results array")
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        url = str(item["url"])
+        if url in seen:
+            continue
+        seen.add(url)
+        highlights = item.get("highlights") or {}
+        parts = highlights.get("highlights") or []
+        snippet = "\n".join(part for part in parts if isinstance(part, str)) if highlights.get("code") == "SUCCESS" else ""
+        hits.append({
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": (snippet.strip() or str(item.get("description") or ""))[:CONTEXT_SNIPPET_CHARS],
+        })
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_context_scrape(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        raise RuntimeError(f"{url}: context scrape failed")
+    content = payload.get("markdown")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError(f"{url}: context scrape returned no markdown")
+    metadata = payload.get("metadata") or {}
+    return {
+        "url": str(metadata.get("finalUrl") or payload.get("url") or url),
+        "title": str(metadata.get("title") or ""),
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+        "_cache_metadata": payload.get("cache_metadata"),
+    }
+
+
 def parse_parallel_extract(
     payload: Any,
     *,
@@ -1343,6 +1439,7 @@ def _pop_flags(page: dict[str, Any]) -> dict[str, Any]:
 
 # Canonical ids. Aliases below keep old CLI names working.
 SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
+    "context",
     "nimble_lite",
     "nimble_standard",
     "parallel_turbo",
@@ -1359,6 +1456,7 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "perplexity_low",
 )
 SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
+    "context",
     "nimble_lite",
     "nimble_standard",
     "parallel_basic",
@@ -1381,11 +1479,12 @@ BACKEND_ALIASES = {
 }
 # Search-only exclusive rows cannot turn fetch on. Search+fetch exclusive rows
 # cannot turn fetch off. Dual-split vendors sit on both boards.
-DUAL_SPLIT_BACKENDS = frozenset({"nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "tinyfish"})
+DUAL_SPLIT_BACKENDS = frozenset({"context", "nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "tinyfish"})
 FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - DUAL_SPLIT_BACKENDS
 FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - DUAL_SPLIT_BACKENDS
 
 BACKENDS: dict[str, Callable[[], SearchBackend]] = {
+    "context": ContextSearch,
     "parallel_basic": ParallelBasic,
     "parallel_turbo": ParallelTurbo,
     "parallel_fast": ParallelFast,
