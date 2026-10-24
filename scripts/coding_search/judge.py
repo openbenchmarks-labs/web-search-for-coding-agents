@@ -119,7 +119,7 @@ def hop_urls(run: Any) -> list[str]:
                 found.append(url)
     for fetch in _fetches(run):
         url = str(_fetch_url(fetch) or "")
-        if url and url not in found:
+        if url and url not in found and _fetch_grounds(fetch):
             found.append(url)
     return found
 
@@ -134,6 +134,8 @@ def hop_retrieved_text(run: Any) -> str:
             parts.append(str(hit.get("title") or ""))
             parts.append(str(hit.get("snippet") or hit.get("text") or hit.get("content") or ""))
     for fetch in _fetches(run):
+        if not _fetch_grounds(fetch):
+            continue
         parts.append(_fetch_title(fetch))
         parts.append(_fetch_body(fetch))
     return "\n".join(part for part in parts if part)
@@ -166,6 +168,17 @@ def _hits(search: Any) -> list[Any]:
     if isinstance(search, dict):
         return list(search.get("hits") or [])
     return list(getattr(search, "hits", None) or [])
+
+
+def _fetch_grounds(fetch: Any) -> bool:
+    """A failed or empty fetch is a budget event, not evidence the URL was retrieved."""
+    if isinstance(fetch, dict):
+        error = fetch.get("error")
+    else:
+        error = getattr(fetch, "error", None)
+    if error:
+        return False
+    return bool(_fetch_body(fetch).strip())
 
 
 def _fetch_url(fetch: Any) -> str:
