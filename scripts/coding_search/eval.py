@@ -250,6 +250,7 @@ def selftest() -> int:
         ("tinyfish", "TINYFISH_API_KEY"),
         ("perplexity_low", "PERPLEXITY_API_KEY"),
         ("perplexity_high", "PERPLEXITY_API_KEY"),
+        ("string", "STRING_API_KEY"),
     )
     for name, key in probes:
         if name in ("you_highlights", "you_highlights_core") and not (
@@ -302,10 +303,10 @@ def main(argv: list[str] | None = None) -> int:
             "Vendor id, comma list, or all (default). all requires --split. "
             "search-only: nimble_lite, nimble_standard, parallel_turbo, parallel_fast, exa_fast, exa_instant, "
             "tavily_fast, brave, linkup_fast, firecrawl, you_highlights, you_highlights_core, tinyfish, "
-            "perplexity_low. "
+            "perplexity_low, string. "
             "search-fetch: nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
             "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you_highlights, you_highlights_core, "
-            "tinyfish, perplexity_high. "
+            "tinyfish, perplexity_high, string. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."
         ),
     )

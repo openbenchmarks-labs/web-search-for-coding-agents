@@ -147,7 +147,16 @@ DATASETS_ROOT=/path/to/tickets PYTHONPATH=scripts python -m coding_search run \
 Keys: `OPENAI_API_KEY` (or Azure NEXTGEN), plus the vendor you run
 (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`, `LINKUP_API_KEY`,
 `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `YDC_API_KEY` or `YOU_API_KEY`,
-`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`). Optional: `BRAINTRUST_API_KEY`.
+`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`, `STRING_API_KEY`). Optional:
+`BRAINTRUST_API_KEY`.
+
+String Web Access runs with `--backend string` on either split; set
+`STRING_API_KEY`. Search sends the query unchanged to `POST /v1/search` with
+`engine=google` and keeps the first results page, trimmed to the requested
+count (eight by default). Fetch calls `POST /v1/fetch` with `format=markdown`
+and `markdownMode=readable`, which drops navigation and other boilerplate before
+the shared 16,000-character content limit applies. Leaderboard results require
+a maintainer run on the held-out tickets.
 
 ## Repository map
 
