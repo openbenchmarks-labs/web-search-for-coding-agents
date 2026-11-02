@@ -1,7 +1,8 @@
 # Web Search API Benchmark for Coding Agents and Developers
 
 Open, independent benchmark of the best web search APIs for coding agents: Exa,
-Parallel, Perplexity, Firecrawl, Tavily, Linkup, Brave, You, Nimble, and TinyFish.
+Parallel, Perplexity, Firecrawl, Tavily, Linkup, Brave, You, Nimble, Keenable, and
+TinyFish.
 Scored on grounded task completion against held-out enterprise documentation
 tickets. Open source code + open data. Search-only and search & fetch are ranked
 separately. The model, the tickets, and the budgets stay fixed; only the search
@@ -147,7 +148,7 @@ DATASETS_ROOT=/path/to/tickets PYTHONPATH=scripts python -m coding_search run \
 Keys: `OPENAI_API_KEY` (or Azure NEXTGEN), plus the vendor you run
 (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`, `LINKUP_API_KEY`,
 `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `YDC_API_KEY` or `YOU_API_KEY`,
-`TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`). Optional: `BRAINTRUST_API_KEY`.
+`NIMBLE_API_KEY`, `KEENABLE_API_KEY`, `TINYFISH_API_KEY`, `PERPLEXITY_API_KEY`). Optional: `BRAINTRUST_API_KEY`.
 
 ## Repository map
 
@@ -174,6 +175,8 @@ same vendors are measured on two other jobs:
 - **Agent-readable index:** https://openbenchmarks.com/llms.txt
 
 ## Changelog
+
+- **2026-11-02.** Added Keenable runners `keenable_pro` (`mode=pro`) and `keenable_realtime` (`mode=realtime`) to both modes; both use `KEENABLE_API_KEY`. Search calls `POST /v1/search` with `max_results=8`, using each result's `snippet` (falling back to `description`) capped at 1,200 chars like the other vendors. Search + fetch calls `GET /v1/fetch` with `max_chars=16000` from the index (`live=false`) and retries once with `live=true` on 404/422 or empty content. Cost basis: $4 per 1,000 requests ($0.004 per search and per fetch, or `usage.credits` × $0.004 when reported; [keenable.ai/pricing](https://keenable.ai/pricing), checked 2026-11-02). Results pending: no scored run yet, so Keenable is not in the tables above.
 
 - **2026-09-15.** Added Nimble lite and standard to both existing tables with three-repeat means and standard deviations. Search uses `focus=general` and `full_content=false`; search + fetch calls `POST /v2/extract` with `formats=[markdown]`. Added You highlights and highlights + `knowledge=core` to both modes, using a separate You Contents call for fetch. Published 100-task, three-repeat results, including standard deviations; replaced the older plain You rows.
 
