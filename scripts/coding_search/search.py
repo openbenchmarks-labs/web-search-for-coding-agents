@@ -603,16 +603,16 @@ class YouHighlightsCore(YouHighlights):
     knowledge = "core"
 
 
-class KeenablePro:
+class KeenableSearch:
     """Keenable Search + Fetch.
 
-    Search: POST /v1/search with mode=pro|realtime; evidence is the snippet
+    Search: POST /v1/search with mode=pro; evidence is the snippet
     (description fallback), capped like other vendors. Fetch: GET /v1/fetch
-    from the index (live=false); on 404/422 or empty content, retry once with
-    live=true. Dual-split. Both arms share KEENABLE_API_KEY.
+    for Keenable's indexed copy (live=false). A 404 or empty content is a
+    failed fetch, like any other vendor's. Dual-split.
     """
 
-    name = "keenable_pro"
+    name = "keenable"
     mode = "pro"
     last_meta: dict[str, Any] | None = None
 
@@ -638,46 +638,20 @@ class KeenablePro:
 
     def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
         del objective
-        headers = self._headers()
-        attempts: list[dict[str, Any]] = []
-        cost = 0.0
-        for live in ("false", "true"):
-            try:
-                payload, meta = vendor_call(
-                    self,
-                    "GET",
-                    KEENABLE_FETCH_URL,
-                    headers=headers,
-                    params={"url": url, "max_chars": DEFAULT_MAX_FETCH_CHARS, "live": live},
-                    timeout=FETCH_TIMEOUT_S,
-                )
-            except Exception as exc:  # noqa: BLE001 - record every failed attempt
-                attempts.append({**public_meta(self.last_meta), "live": live, "cost_usd": 0.0})
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                if live == "false" and status in (404, 422):
-                    continue
-                self.last_meta = {**(self.last_meta or {}), "attempts": attempts, "cost_usd": cost}
-                raise
-            attempt_cost = keenable_cost_usd(payload)
-            cost += attempt_cost
-            attempts.append({**public_meta(meta), "live": live, "cost_usd": attempt_cost})
-            try:
-                page = parse_keenable_fetch(payload, url=url)
-            except RuntimeError:
-                self.last_meta = {**meta, "attempts": attempts, "cost_usd": cost}
-                if live == "false":
-                    continue
-                raise
-            flags = _pop_flags(page)
-            self.last_meta = {**meta, **flags, "attempts": attempts, "cost_usd": cost}
-            page["_meta"] = self.last_meta
-            return page
-        raise RuntimeError(f"{url}: keenable fetch failed")  # unreachable
-
-
-class KeenableRealtime(KeenablePro):
-    name = "keenable_realtime"
-    mode = "realtime"
+        payload, meta = vendor_call(
+            self,
+            "GET",
+            KEENABLE_FETCH_URL,
+            headers=self._headers(),
+            params={"url": url, "max_chars": DEFAULT_MAX_FETCH_CHARS, "live": "false"},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        self.last_meta = {**meta, "cost_usd": keenable_cost_usd(payload)}
+        page = parse_keenable_fetch(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**self.last_meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
 
 
 class TinyfishSearch:
@@ -1482,8 +1456,7 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "firecrawl",
     "you_highlights",
     "you_highlights_core",
-    "keenable_pro",
-    "keenable_realtime",
+    "keenable",
     "tinyfish",
     "perplexity_low",
 )
@@ -1500,8 +1473,7 @@ SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "firecrawl",
     "you_highlights",
     "you_highlights_core",
-    "keenable_pro",
-    "keenable_realtime",
+    "keenable",
     "tinyfish",
     "perplexity_high",
 )
@@ -1512,7 +1484,7 @@ BACKEND_ALIASES = {
 }
 # Search-only exclusive rows cannot turn fetch on. Search+fetch exclusive rows
 # cannot turn fetch off. Dual-split vendors sit on both boards.
-DUAL_SPLIT_BACKENDS = frozenset({"nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "keenable_pro", "keenable_realtime", "tinyfish"})
+DUAL_SPLIT_BACKENDS = frozenset({"nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "keenable", "tinyfish"})
 FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - DUAL_SPLIT_BACKENDS
 FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - DUAL_SPLIT_BACKENDS
 
@@ -1539,8 +1511,7 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "nimble_standard": NimbleStandard,
     "you_highlights": YouHighlights,
     "you_highlights_core": YouHighlightsCore,
-    "keenable_pro": KeenablePro,
-    "keenable_realtime": KeenableRealtime,
+    "keenable": KeenableSearch,
     "tinyfish": TinyfishSearch,
     "perplexity_low": PerplexitySearch,
     "perplexity_high": PerplexityHigh,

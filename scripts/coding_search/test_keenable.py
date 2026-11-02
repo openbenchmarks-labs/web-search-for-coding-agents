@@ -1,4 +1,4 @@
-"""Offline contracts for the two Keenable configurations (no network)."""
+"""Offline contracts for the Keenable arm (no network)."""
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -8,7 +8,7 @@ import requests
 from coding_search import search
 from coding_search.eval import parse_arms
 
-ARMS = (("keenable_pro", "pro"), ("keenable_realtime", "realtime"))
+ARM = "keenable"
 
 
 def _http_error(status: int) -> requests.HTTPError:
@@ -39,30 +39,30 @@ class KeenableContracts(unittest.TestCase):
         self.addCleanup(env.stop)
 
     def test_roster_membership(self):
-        for arm, _ in ARMS:
-            self.assertIn(arm, search.SEARCH_ONLY_BACKENDS)
-            self.assertIn(arm, search.SEARCH_FETCH_BACKENDS)
-            self.assertIn(arm, search.DUAL_SPLIT_BACKENDS)
-            self.assertEqual(search.get_backend(arm).name, arm)
-            self.assertEqual(parse_arms(arm, split="search-only"), (arm,))
-            self.assertEqual(parse_arms(arm, split="search-fetch"), (arm,))
+        self.assertIn(ARM, search.SEARCH_ONLY_BACKENDS)
+        self.assertIn(ARM, search.SEARCH_FETCH_BACKENDS)
+        self.assertIn(ARM, search.DUAL_SPLIT_BACKENDS)
+        self.assertEqual(search.get_backend(ARM).name, ARM)
+        self.assertEqual(parse_arms(ARM, split="search-only"), (ARM,))
+        self.assertEqual(parse_arms(ARM, split="search-fetch"), (ARM,))
+        keenable_ids = [b for b in search.BACKENDS if "keenable" in b]
+        self.assertEqual(keenable_ids, [ARM])
 
     def test_search_request_contract(self):
         payload = {"results": [{"url": "https://a.test", "title": "A", "snippet": "S"}]}
-        for arm, mode in ARMS:
-            with self.subTest(arm=arm), patch.object(search, "vendor_call", return_value=(payload, {})) as call:
-                hits = search.get_backend(arm).search("Unchanged question?", max_results=8)
-                self.assertEqual(hits, [{"url": "https://a.test", "title": "A", "snippet": "S"}])
-                self.assertEqual(call.call_count, 1)
-                self.assertEqual(call.call_args.args[1:3], ("POST", search.KEENABLE_SEARCH_URL))
-                self.assertEqual(call.call_args.kwargs["headers"]["X-API-Key"], "test-key")
-                self.assertEqual(call.call_args.kwargs["json_body"],
-                                 {"query": "Unchanged question?", "mode": mode, "max_results": 8})
+        with patch.object(search, "vendor_call", return_value=(payload, {})) as call:
+            hits = search.get_backend(ARM).search("Unchanged question?", max_results=8)
+        self.assertEqual(hits, [{"url": "https://a.test", "title": "A", "snippet": "S"}])
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[1:3], ("POST", search.KEENABLE_SEARCH_URL))
+        self.assertEqual(call.call_args.kwargs["headers"]["X-API-Key"], "test-key")
+        self.assertEqual(call.call_args.kwargs["json_body"],
+                         {"query": "Unchanged question?", "mode": "pro", "max_results": 8})
 
     def test_missing_key_raises(self):
         with patch.dict(os.environ, {"KEENABLE_API_KEY": ""}):
             with self.assertRaises(RuntimeError):
-                search.get_backend("keenable_pro").search("q")
+                search.get_backend(ARM).search("q")
 
     def test_parser(self):
         payload = {"results": [
@@ -91,15 +91,15 @@ class KeenableContracts(unittest.TestCase):
         self.assertAlmostEqual(search.keenable_cost_usd({"usage": {"credits": True}}), 0.004)
         self.assertAlmostEqual(search.keenable_cost_usd({"usage": None}), 0.004)
         with patch.object(search, "vendor_call", return_value=({"results": [], "usage": {"credits": 3}}, {})):
-            backend = search.get_backend("keenable_pro")
+            backend = search.get_backend(ARM)
             backend.search("q")
             self.assertAlmostEqual(backend.last_meta["cost_usd"], 0.012)
 
-    def test_fetch_indexed_ok_no_retry(self):
+    def test_fetch_indexed_request_contract(self):
         page = {"url": "https://a.test/final", "title": "T", "content": "x" * 20000,
                 "published_at": 1761955200, "usage": {"credits": 1}}
         with patch.object(search, "vendor_call", _fake_vendor_call(page)) as call:
-            backend = search.get_backend("keenable_realtime")
+            backend = search.get_backend(ARM)
             out = backend.fetch("https://a.test")
         self.assertEqual(call.call_count, 1)
         self.assertEqual(call.call_args.args[1:3], ("GET", search.KEENABLE_FETCH_URL))
@@ -109,64 +109,34 @@ class KeenableContracts(unittest.TestCase):
         self.assertEqual(out["url"], "https://a.test/final")
         self.assertEqual(len(out["content"]), search.DEFAULT_MAX_FETCH_CHARS)
         self.assertTrue(out["_meta"]["truncated"])
-        self.assertEqual([a["live"] for a in out["_meta"]["attempts"]], ["false"])
+        self.assertNotIn("attempts", out["_meta"])
         self.assertAlmostEqual(out["_meta"]["cost_usd"], 0.004)
 
-    def test_fetch_404_then_live_ok(self):
-        for status in (404, 422):
+    def test_fetch_http_error_is_failed_fetch_no_retry(self):
+        for status in (404, 422, 500):
             with self.subTest(status=status), patch.object(
-                search, "vendor_call", _fake_vendor_call(_http_error(status), {"content": "Live page"})
+                search, "vendor_call", _fake_vendor_call(_http_error(status))
             ) as call:
-                out = search.get_backend("keenable_pro").fetch("https://a.test")
-                self.assertEqual(call.call_count, 2)
-                self.assertEqual([c.kwargs["params"]["live"] for c in call.call_args_list], ["false", "true"])
-                self.assertEqual(out["content"], "Live page")
-                attempts = out["_meta"]["attempts"]
-                self.assertEqual([(a["live"], a["cost_usd"]) for a in attempts], [("false", 0.0), ("true", 0.004)])
-                self.assertEqual(attempts[0]["http_status"], status)
-                self.assertAlmostEqual(out["_meta"]["cost_usd"], 0.004)
+                with self.assertRaises(requests.HTTPError):
+                    search.get_backend(ARM).fetch("https://a.test")
+                self.assertEqual(call.call_count, 1)
 
-    def test_fetch_empty_then_live_ok(self):
-        with patch.object(search, "vendor_call", _fake_vendor_call({"content": ""}, {"content": "Live"})) as call:
-            out = search.get_backend("keenable_pro").fetch("https://a.test")
-        self.assertEqual(call.call_count, 2)
-        self.assertEqual(out["content"], "Live")
-        self.assertAlmostEqual(out["_meta"]["cost_usd"], 0.008)
-
-    def test_fetch_both_fail(self):
-        backend = search.get_backend("keenable_pro")
-        with patch.object(search, "vendor_call", _fake_vendor_call(_http_error(404), _http_error(404))):
-            with self.assertRaises(requests.HTTPError):
-                backend.fetch("https://a.test")
-        self.assertEqual(len(backend.last_meta["attempts"]), 2)
-        self.assertEqual(backend.last_meta["cost_usd"], 0.0)
-        with patch.object(search, "vendor_call", _fake_vendor_call({"content": ""}, {"content": None})):
-            with self.assertRaises(RuntimeError):
-                backend.fetch("https://a.test")
-        self.assertEqual(len(backend.last_meta["attempts"]), 2)
-
-    def test_fetch_other_error_not_retried(self):
-        with patch.object(search, "vendor_call", _fake_vendor_call(_http_error(500))) as call:
-            with self.assertRaises(requests.HTTPError):
-                search.get_backend("keenable_pro").fetch("https://a.test")
-        self.assertEqual(call.call_count, 1)
-
-    def test_fetch_network_error_recorded_not_retried(self):
-        error = RuntimeError("Timeout: read timed out")
-        setattr(error, "vendor_meta", {"http_status": None, "error": "Timeout", "request": {}, "response": None})
-        backend = search.get_backend("keenable_pro")
-        with patch.object(search, "vendor_call", _fake_vendor_call(error)) as call:
-            with self.assertRaises(RuntimeError):
-                backend.fetch("https://a.test")
-        self.assertEqual(call.call_count, 1)
-        self.assertEqual([(a["live"], a["cost_usd"]) for a in backend.last_meta["attempts"]], [("false", 0.0)])
-        self.assertEqual(backend.last_meta["cost_usd"], 0.0)
+    def test_fetch_empty_content_is_failed_fetch_no_retry(self):
+        for payload in ({"content": ""}, {"content": None}, {}, None):
+            with self.subTest(payload=payload), patch.object(
+                search, "vendor_call", _fake_vendor_call(payload)
+            ) as call:
+                backend = search.get_backend(ARM)
+                with self.assertRaises(RuntimeError):
+                    backend.fetch("https://a.test")
+                self.assertEqual(call.call_count, 1)
+                self.assertAlmostEqual(backend.last_meta["cost_usd"], 0.004)
 
     def test_api_key_never_in_request_audit(self):
         response = MagicMock(ok=True, status_code=200, content=b"{}", headers={}, text="{}")
         response.json.return_value = {"results": []}
         with patch.object(search.requests, "request", return_value=response) as sent:
-            backend = search.get_backend("keenable_pro")
+            backend = search.get_backend(ARM)
             backend.search("q")
         self.assertEqual(sent.call_args.kwargs["headers"]["X-API-Key"], "test-key")
         self.assertNotIn("test-key", repr(backend.last_meta))

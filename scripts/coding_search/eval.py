@@ -247,8 +247,7 @@ def selftest() -> int:
         ("nimble_standard", "NIMBLE_API_KEY"),
         ("you_highlights", "YDC_API_KEY"),
         ("you_highlights_core", "YDC_API_KEY"),
-        ("keenable_pro", "KEENABLE_API_KEY"),
-        ("keenable_realtime", "KEENABLE_API_KEY"),
+        ("keenable", "KEENABLE_API_KEY"),
         ("tinyfish", "TINYFISH_API_KEY"),
         ("perplexity_low", "PERPLEXITY_API_KEY"),
         ("perplexity_high", "PERPLEXITY_API_KEY"),
@@ -304,11 +303,11 @@ def main(argv: list[str] | None = None) -> int:
             "Vendor id, comma list, or all (default). all requires --split. "
             "search-only: nimble_lite, nimble_standard, parallel_turbo, parallel_fast, exa_fast, exa_instant, "
             "tavily_fast, brave, linkup_fast, firecrawl, you_highlights, you_highlights_core, "
-            "keenable_pro, keenable_realtime, tinyfish, "
+            "keenable, tinyfish, "
             "perplexity_low. "
             "search-fetch: nimble_lite, nimble_standard, parallel_basic, parallel_advanced, exa_auto, exa_deep, "
             "tavily_basic, tavily_advanced, linkup_standard, firecrawl, you_highlights, you_highlights_core, "
-            "keenable_pro, keenable_realtime, tinyfish, perplexity_high. "
+            "keenable, tinyfish, perplexity_high. "
             "Aliases: exa=exa_auto, tavily=tavily_fast, linkup=linkup_fast."
         ),
     )
