@@ -1,9 +1,9 @@
 """Pluggable web-search backends.
 
 HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, Brave
-(LLM Context), You.com, TinyFish, and Perplexity. Vendors are locked to
-search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
-SEARCH_FETCH_BACKENDS. Firecrawl, You, and TinyFish sit on both.
+(LLM Context), You.com, Keenable, TinyFish, and Perplexity. Vendors are locked
+to search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
+SEARCH_FETCH_BACKENDS. Firecrawl, You, Keenable, and TinyFish sit on both.
 Perplexity low is search-only; Perplexity high is search-fetch.
 """
 
@@ -33,6 +33,10 @@ BRAVE_LLM_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 BRAVE_SNIPPET_CHARS = 8000
 YOU_SEARCH_URL = "https://ydc-index.io/v1/search"
 YOU_CONTENTS_URL = "https://ydc-index.io/v1/contents"
+KEENABLE_SEARCH_URL = "https://api.keenable.ai/v1/search"
+KEENABLE_FETCH_URL = "https://api.keenable.ai/v1/fetch"
+# $4 per 1,000 requests (keenable.ai/pricing, checked 2026-11-02).
+KEENABLE_USD_PER_CREDIT = 0.004
 TINYFISH_SEARCH_URL = "https://api.search.tinyfish.ai"
 TINYFISH_FETCH_URL = "https://api.fetch.tinyfish.ai"
 TINYFISH_FETCH_TIMEOUT_S = 150
@@ -598,6 +602,57 @@ class YouHighlightsCore(YouHighlights):
     knowledge = "core"
 
 
+class KeenableSearch:
+    """Keenable Search + Fetch.
+
+    Search: POST /v1/search with mode=pro; evidence is the snippet
+    (description fallback), capped like other vendors. Fetch: GET /v1/fetch
+    for Keenable's indexed copy (live=false). A 404 or empty content is a
+    failed fetch, like any other vendor's. Dual-split.
+    """
+
+    name = "keenable"
+    mode = "pro"
+    last_meta: dict[str, Any] | None = None
+
+    def _headers(self) -> dict[str, str]:
+        key = os.environ.get("KEENABLE_API_KEY")
+        if not key:
+            raise RuntimeError(f"KEENABLE_API_KEY is required for {self.name}")
+        return {"X-API-Key": key, "Content-Type": "application/json"}
+
+    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+        n = max(1, min(int(max_results), 50))
+        payload, meta = vendor_call(
+            self,
+            "POST",
+            KEENABLE_SEARCH_URL,
+            headers=self._headers(),
+            json_body={"query": query, "mode": self.mode, "max_results": n},
+            timeout=45,
+        )
+        hits = parse_keenable_hits(payload, max_results=n)
+        self.last_meta = {**_search_meta(meta, hits), "cost_usd": keenable_cost_usd(payload)}
+        return hits
+
+    def fetch(self, url: str, *, objective: str = "") -> dict[str, str]:
+        del objective
+        payload, meta = vendor_call(
+            self,
+            "GET",
+            KEENABLE_FETCH_URL,
+            headers=self._headers(),
+            params={"url": url, "max_chars": DEFAULT_MAX_FETCH_CHARS, "live": "false"},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        self.last_meta = {**meta, "cost_usd": keenable_cost_usd(payload)}
+        page = parse_keenable_fetch(payload, url=url)
+        flags = _pop_flags(page)
+        self.last_meta = {**self.last_meta, **flags}
+        page["_meta"] = self.last_meta
+        return page
+
+
 class TinyfishSearch:
     """TinyFish Search + Fetch.
 
@@ -1100,6 +1155,51 @@ def parse_you_contents(
     }
 
 
+def keenable_cost_usd(payload: Any) -> float:
+    """usage.credits x $0.004 when reported, else the $0.004 list price."""
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    credits = usage.get("credits") if isinstance(usage, dict) else None
+    if isinstance(credits, (int, float)) and not isinstance(credits, bool):
+        return float(credits) * KEENABLE_USD_PER_CREDIT
+    return KEENABLE_USD_PER_CREDIT
+
+
+def parse_keenable_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
+    rows = payload.get("results") if isinstance(payload, dict) else None
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows if isinstance(rows, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+            continue
+        url = item["url"].strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        snippet = str(item.get("snippet") or item.get("description") or "")
+        hits.append({"url": url, "title": str(item.get("title") or ""), "snippet": snippet[:1200]})
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def parse_keenable_fetch(
+    payload: Any,
+    *,
+    url: str,
+    max_chars: int = DEFAULT_MAX_FETCH_CHARS,
+) -> dict[str, str]:
+    item = payload if isinstance(payload, dict) else {}
+    content = item.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError(f"{url}: keenable fetch returned no content")
+    return {
+        "url": str(item.get("url") or url),
+        "title": str(item.get("title") or ""),
+        "content": content[:max_chars],
+        "_truncated": len(content) > max_chars,
+    }
+
+
 def parse_tinyfish_hits(payload: Any, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
     rows = (payload or {}).get("results") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
@@ -1355,6 +1455,7 @@ SEARCH_ONLY_BACKENDS: tuple[str, ...] = (
     "firecrawl",
     "you_highlights",
     "you_highlights_core",
+    "keenable",
     "tinyfish",
     "perplexity_low",
 )
@@ -1371,6 +1472,7 @@ SEARCH_FETCH_BACKENDS: tuple[str, ...] = (
     "firecrawl",
     "you_highlights",
     "you_highlights_core",
+    "keenable",
     "tinyfish",
     "perplexity_high",
 )
@@ -1381,7 +1483,7 @@ BACKEND_ALIASES = {
 }
 # Search-only exclusive rows cannot turn fetch on. Search+fetch exclusive rows
 # cannot turn fetch off. Dual-split vendors sit on both boards.
-DUAL_SPLIT_BACKENDS = frozenset({"nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "tinyfish"})
+DUAL_SPLIT_BACKENDS = frozenset({"nimble_lite", "nimble_standard", "firecrawl", "you_highlights", "you_highlights_core", "keenable", "tinyfish"})
 FETCH_FORBIDDEN = frozenset(SEARCH_ONLY_BACKENDS) - DUAL_SPLIT_BACKENDS
 FETCH_REQUIRED = frozenset(SEARCH_FETCH_BACKENDS) - DUAL_SPLIT_BACKENDS
 
@@ -1408,6 +1510,7 @@ BACKENDS: dict[str, Callable[[], SearchBackend]] = {
     "nimble_standard": NimbleStandard,
     "you_highlights": YouHighlights,
     "you_highlights_core": YouHighlightsCore,
+    "keenable": KeenableSearch,
     "tinyfish": TinyfishSearch,
     "perplexity_low": PerplexitySearch,
     "perplexity_high": PerplexityHigh,
