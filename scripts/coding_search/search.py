@@ -651,9 +651,9 @@ class KeenablePro:
                     params={"url": url, "max_chars": DEFAULT_MAX_FETCH_CHARS, "live": live},
                     timeout=FETCH_TIMEOUT_S,
                 )
-            except requests.HTTPError as exc:
+            except Exception as exc:  # noqa: BLE001 - record every failed attempt
                 attempts.append({**public_meta(self.last_meta), "live": live, "cost_usd": 0.0})
-                status = getattr(exc.response, "status_code", None)
+                status = getattr(getattr(exc, "response", None), "status_code", None)
                 if live == "false" and status in (404, 422):
                     continue
                 self.last_meta = {**(self.last_meta or {}), "attempts": attempts, "cost_usd": cost}

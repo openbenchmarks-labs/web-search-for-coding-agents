@@ -71,6 +71,7 @@ class KeenableContracts(unittest.TestCase):
             {"title": "no url"},
             {"url": "https://a.test", "snippet": "dupe"},
             {"url": "https://c.test", "published_at": 1761955200},
+            None, "not-a-dict", ["list"], {"url": None}, {"url": "   "},
         ]}
         hits = search.parse_keenable_hits(payload, max_results=10)
         self.assertEqual([h["url"] for h in hits], ["https://a.test", "https://b.test", "https://c.test"])
@@ -87,6 +88,8 @@ class KeenableContracts(unittest.TestCase):
         self.assertAlmostEqual(search.keenable_cost_usd({"results": []}), 0.004)
         self.assertAlmostEqual(search.keenable_cost_usd({"usage": {"credits": "1"}}), 0.004)
         self.assertAlmostEqual(search.keenable_cost_usd(None), 0.004)
+        self.assertAlmostEqual(search.keenable_cost_usd({"usage": {"credits": True}}), 0.004)
+        self.assertAlmostEqual(search.keenable_cost_usd({"usage": None}), 0.004)
         with patch.object(search, "vendor_call", return_value=({"results": [], "usage": {"credits": 3}}, {})):
             backend = search.get_backend("keenable_pro")
             backend.search("q")
@@ -147,6 +150,27 @@ class KeenableContracts(unittest.TestCase):
             with self.assertRaises(requests.HTTPError):
                 search.get_backend("keenable_pro").fetch("https://a.test")
         self.assertEqual(call.call_count, 1)
+
+    def test_fetch_network_error_recorded_not_retried(self):
+        error = RuntimeError("Timeout: read timed out")
+        setattr(error, "vendor_meta", {"http_status": None, "error": "Timeout", "request": {}, "response": None})
+        backend = search.get_backend("keenable_pro")
+        with patch.object(search, "vendor_call", _fake_vendor_call(error)) as call:
+            with self.assertRaises(RuntimeError):
+                backend.fetch("https://a.test")
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual([(a["live"], a["cost_usd"]) for a in backend.last_meta["attempts"]], [("false", 0.0)])
+        self.assertEqual(backend.last_meta["cost_usd"], 0.0)
+
+    def test_api_key_never_in_request_audit(self):
+        response = MagicMock(ok=True, status_code=200, content=b"{}", headers={}, text="{}")
+        response.json.return_value = {"results": []}
+        with patch.object(search.requests, "request", return_value=response) as sent:
+            backend = search.get_backend("keenable_pro")
+            backend.search("q")
+        self.assertEqual(sent.call_args.kwargs["headers"]["X-API-Key"], "test-key")
+        self.assertNotIn("test-key", repr(backend.last_meta))
+        self.assertEqual(backend.last_meta["request"]["headers"]["X-API-Key"], "***REDACTED***")
 
     def test_api_key_header_redacted(self):
         for header in ("X-API-Key", "x-api-key", "X-Api-Key"):
