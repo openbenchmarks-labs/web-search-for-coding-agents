@@ -1,10 +1,9 @@
 """Pluggable web-search backends.
 
 HTTP call + hit shape for Parallel, Firecrawl, Exa, Linkup, Tavily, Brave
-(LLM Context), You.com, Nimble, Keenable, TinyFish, and Perplexity. Vendors are
-locked to search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
-SEARCH_FETCH_BACKENDS. Firecrawl, You, Nimble, Keenable, and TinyFish sit on
-both.
+(LLM Context), You.com, Keenable, TinyFish, and Perplexity. Vendors are locked
+to search-only vs search-fetch boards in SEARCH_ONLY_BACKENDS /
+SEARCH_FETCH_BACKENDS. Firecrawl, You, Keenable, and TinyFish sit on both.
 Perplexity low is search-only; Perplexity high is search-fetch.
 """
 
