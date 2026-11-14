@@ -141,6 +141,24 @@ DATASETS_ROOT=/path/to/tickets PYTHONPATH=scripts python -m coding_search run \
   --out /tmp/coding-search-eval.json
 ```
 
+### Replay a saved run
+
+Every result row carries `judge_evidence`: the exact URLs and retrieved text
+the judge scored (with a sha256 and the harness `code_rev`), plus the task
+fields it read (`judge_task`). Hop summaries still clip snippets (1,200 chars)
+and fetch bodies (800) for size; the judge never uses those for rows that have
+evidence. Re-score offline, with no API keys or network:
+
+```bash
+PYTHONPATH=scripts python -m coding_search replay /tmp/coding-search-eval.json
+```
+
+Each row prints `match`, `mismatch` (with live and replay notes), `corrupt`
+(evidence hash check failed) or `skipped`. Exit code is 1 on any mismatch or
+corrupt row. Rows saved before `judge_evidence` existed are replayed from hop
+summaries (`from=hop_summaries`) with tasks loaded from `DATASETS_ROOT`; a
+mismatch there marks a verdict the old summaries cannot reproduce.
+
 `--backend all` requires `--split`. Aliases: `exa` → `exa_auto`, `tavily` →
 `tavily_fast`, `linkup` → `linkup_fast`.
 
@@ -156,7 +174,8 @@ Keys: `OPENAI_API_KEY` (or Azure NEXTGEN), plus the vendor you run
 | `scripts/coding_search/search.py` | Vendor HTTP runners (search + fetch) |
 | `scripts/coding_search/judge.py` | Compile + gold tokens + grounded `# source:` URL |
 | `scripts/coding_search/agent.py` | LLM loop with `web_search` / `web_fetch` |
-| `scripts/coding_search/eval.py` | CLI: `selftest`, `run`, Braintrust tracing |
+| `scripts/coding_search/eval.py` | CLI: `selftest`, `run`, `replay`, Braintrust tracing |
+| `scripts/coding_search/replay.py` | Judge evidence persistence + offline re-scoring |
 | `scripts/coding_search/tasks.py` | Load a local ticket catalog |
 | `scripts/coding_search/rawlog.py` | Redacted hop dumps |
 | `scripts/coding_search/tracing.py` | Optional Braintrust spans |
