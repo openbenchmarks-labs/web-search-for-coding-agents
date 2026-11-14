@@ -13,8 +13,9 @@ from typing import Any
 
 from .agent import DEFAULT_MODEL, run_agent
 from .env import datasets_root, llm_transport, load_environment, make_llm_client
-from .judge import extract_code, hop_retrieved_text, hop_urls, score_needles
+from .judge import extract_code, score_needles
 from .rawlog import new_run_stamp, parse_run_stamp, write_arm_raw
+from .replay import judge_evidence, judge_task, print_reports, replay_paths
 from .search import (
     BACKENDS,
     FETCH_FORBIDDEN,
@@ -134,12 +135,13 @@ def run_arm(
             leak_needles=task.leak_needles(),
         )
         source = extract_code(run.answer, task.outfile)
+        evidence = judge_evidence(run)
         with judge_span(task_id=task.id, backend=label) as scored:
             score = score_needles(
                 source,
                 task,
-                observed_urls=hop_urls(run),
-                retrieved_text=hop_retrieved_text(run),
+                observed_urls=evidence["observed_urls"],
+                retrieved_text=evidence["retrieved_text"],
             )
             log_span(scored, output=score.to_dict(), scores={"passed": float(score.passed)})
         log_span(
@@ -163,6 +165,8 @@ def run_arm(
         "fetch_hops": [call.hop_dict() for call in run.fetches],
         "passed": score.passed,
         "score": score.to_dict(),
+        "judge_task": judge_task(task),
+        "judge_evidence": evidence,
         "metrics": run.metrics(),
         "source": source,
         "notes": run.notes,
@@ -210,6 +214,16 @@ def failed_arm(task, *, backend: str, allow_fetch: bool, exc: BaseException) -> 
         "query_contained_gold_token": False,
         "error": f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
     }
+
+
+def replay_cmd(paths: list[Path]) -> int:
+    tasks_by_id = None
+    try:
+        tasks_by_id = {task.id: task for task in load_tasks()}
+    except Exception:  # noqa: BLE001 - only needed for rows saved without judge_task
+        tasks_by_id = None
+    counts = print_reports(replay_paths(paths, tasks_by_id=tasks_by_id))
+    return 1 if counts["mismatch"] or counts["corrupt"] else 0
 
 
 def selftest() -> int:
@@ -293,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("selftest", help="Load datasets + judge gold/starter + construct runners.")
     sub.add_parser("ensure-projects", help="Create or fetch Braintrust projects web-coding-private and web-coding-public.")
+    replay = sub.add_parser(
+        "replay",
+        help="Re-score saved runs offline from their judge_evidence and report any change in verdict.",
+    )
+    replay.add_argument("paths", nargs="+", type=Path, help="Eval summary JSON (--out) or raw run.json files.")
     run = sub.add_parser("run", help="Score one or more tickets.")
     run.add_argument("--ids", default="")
     run.add_argument(
@@ -338,6 +357,8 @@ def main(argv: list[str] | None = None) -> int:
     load_environment()
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "replay":
+        return replay_cmd(args.paths)
     if args.cmd == "ensure-projects":
         for key, spec in DATASETS.items():
             project_id = ensure_project(str(spec["project_name"]))
